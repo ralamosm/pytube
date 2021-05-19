@@ -19,7 +19,7 @@ def test_install_proxy(opener):
 
 @mock.patch("pytube.request.get")
 def test_video_unavailable(get):
-    get.return_value = ""
+    get.return_value = "{}"
     youtube = YouTube("https://www.youtube.com/watch?v=9bZkp7q19f0")
     with pytest.raises(RegexMatchError):
         youtube.check_availability()

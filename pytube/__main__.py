@@ -57,7 +57,7 @@ class YouTube:
         self._vid_info_raw: Optional[str] = None  # content fetched by vid_info_url
         self._vid_info: Optional[Dict] = None  # parsed content of vid_info_raw
 
-        self._watch_html: Optional[str] = None  # the html of /watch?v=<video_id>
+        self._watch_html: Optional[str] = None
         self._embed_html: Optional[str] = None
         self._player_config_args: Optional[Dict] = None  # inline js in the html containing
         self._player_response: Optional[Dict] = None
@@ -203,7 +203,6 @@ class YouTube:
         If the streams have not been initialized, finds all relevant
         streams and initializes them.
         """
-        self.check_availability()
         if self._fmt_streams:
             return self._fmt_streams
 
@@ -243,31 +242,36 @@ class YouTube:
         Raises different exceptions based on why the video is unavailable,
         otherwise does nothing.
         """
-        status, messages = extract.playability_status(self.watch_html)
+        playability_status = self.vid_info['playabilityStatus']
+        status = playabilityStatus['status']
+        reason = playabilityStatus['reason']
 
-        for reason in messages:
-            if status == 'UNPLAYABLE':
-                if reason == (
-                    'Join this channel to get access to members-only content '
-                    'like this video, and other exclusive perks.'
-                ):
-                    raise exceptions.MembersOnly(video_id=self.video_id)
-                elif reason == 'This live stream recording is not available.':
-                    raise exceptions.RecordingUnavailable(video_id=self.video_id)
-                else:
-                    if reason == 'Video unavailable':
-                        if extract.is_region_blocked(self.watch_html):
-                            raise exceptions.VideoRegionBlocked(video_id=self.video_id)
-                    raise exceptions.VideoUnavailable(video_id=self.video_id)
-            elif status == 'LOGIN_REQUIRED':
-                if reason == (
-                    'This is a private video. '
-                    'Please sign in to verify that you may see it.'
-                ):
-                    raise exceptions.VideoPrivate(video_id=self.video_id)
-            elif status == 'ERROR':
+        if status == 'UNPLAYABLE':
+            if reason == (
+                'Join this channel to get access to members-only content '
+                'like this video, and other exclusive perks.'
+            ):
+                return exceptions.MembersOnly(video_id=self.video_id)
+            elif reason == 'This live stream recording is not available.':
+                return exceptions.RecordingUnavailable(video_id=self.video_id)
+            else:
                 if reason == 'Video unavailable':
-                    raise exceptions.VideoUnavailable(video_id=self.video_id)
+                    cr = self.vid_info['cr']
+                    available_countries = self.vid_info['player_response'][
+                        'microformat']['playerMicroformatRenderer'][
+                        'availableCountries']
+                    if cr not in available_countries:
+                        return exceptions.VideoRegionBlocked(video_id=self.video_id)
+                return exceptions.VideoUnavailable(video_id=self.video_id)
+        elif status == 'LOGIN_REQUIRED':
+            if reason == (
+                'This is a private video. '
+                'Please sign in to verify that you may see it.'
+            ):
+                return exceptions.VideoPrivate(video_id=self.video_id)
+        elif status == 'ERROR':
+            if reason == 'Video unavailable':
+                return exceptions.VideoUnavailable(video_id=self.video_id)
 
     @property
     def vid_info(self):
@@ -275,7 +279,9 @@ class YouTube:
 
         :rtype: Dict[Any, Any]
         """
-        return dict(parse_qsl(self.vid_info_raw))
+        info = dict(parse_qsl(self.vid_info_raw))
+        info['player_response'] = json.loads(info['player_response'])
+        return info
 
     @property
     def caption_tracks(self) -> List[pytube.Caption]:
@@ -304,8 +310,14 @@ class YouTube:
 
         :rtype: :class:`StreamQuery <StreamQuery>`.
         """
-        self.check_availability()
-        return StreamQuery(self.fmt_streams)
+        try:
+            return StreamQuery(self.fmt_streams)
+        except Exception as e:
+            print(e)
+            availability_exception = self.check_availability()
+            if availability_exception:
+                raise availability_exception
+            raise
 
     @property
     def thumbnail_url(self) -> str:
@@ -332,7 +344,8 @@ class YouTube:
         """
         if self._publish_date:
             return self._publish_date
-        self._publish_date = extract.publish_date(self.watch_html)
+        self._publish_date = self.vid_info['player_response']['microformat'][
+            'playerMicroformatRenderer']['publishDate']
         return self._publish_date
 
     @publish_date.setter
