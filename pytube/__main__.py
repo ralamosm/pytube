@@ -203,6 +203,8 @@ class YouTube:
         Raises different exceptions based on why the video is unavailable,
         otherwise does nothing.
         """
+        # Ugly Hack: Just return because this method doesnt follow oauth auth
+        return
         status, messages = extract.playability_status(self.watch_html)
 
         for reason in messages:
